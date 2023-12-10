@@ -1,0 +1,18 @@
+run the following input:
+./main 0.5 4 8 ./invector.txt
+
+Add following into makefile
+EXE	        = main
+OBJ	        = main.o merging.o merging_gold.o
+
+default: $(EXE)
+
+main.o: main_merge.cu
+	$(NVCC) -c -o $@ main_merge.cu $(NVCC_FLAGS)
+
+merging.o:  merging.cu
+	$(NVCC) -c -o $@ merging.cu $(NVCC_FLAGS)
+
+merging_gold.o: merging_gold.cpp
+	$(NVCC) -c -o $@ merging_gold.cpp $(NVCC_FLAGS)
+
