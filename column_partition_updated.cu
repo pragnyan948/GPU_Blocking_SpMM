@@ -45,7 +45,7 @@ void writeResultMatrixToFileGPU(int *result, int numRows, int quotientSize, cons
 }
 
 // Function to perform column partitioning on GPU
-void columnPartition(int *matrix, int numRows, int numCols, int partitionSize) {
+void columnPartition(int *matrix, int numRows, int numCols, int partitionSize, int *result) {
     int quotientSize = numCols / partitionSize;
 
     // Allocate GPU memory for matrix and result
@@ -61,7 +61,7 @@ void columnPartition(int *matrix, int numRows, int numCols, int partitionSize) {
     columnPartitionKernel<<<gridSize, blockSize>>>(d_matrix, numRows, numCols, partitionSize, d_result);
 
     // Copy the result back from GPU to CPU
-    int *result = (int *)malloc(numRows * quotientSize * sizeof(int));
+    // int *result = (int *)malloc(numRows * quotientSize * sizeof(int));
     cudaMemcpy(result, d_result, numRows * quotientSize * sizeof(int), cudaMemcpyDeviceToHost);
 
     // Print the binary vectors for each row
@@ -79,7 +79,7 @@ void columnPartition(int *matrix, int numRows, int numCols, int partitionSize) {
     // Free GPU memory
     cudaFree(d_matrix);
     cudaFree(d_result);
-    free(result);
+    // free(result);
 }
 
 // Function to generate a random sparse matrix
@@ -107,6 +107,8 @@ int main() {
     // Example matrix dimensions
     int numRows = 100;
     int numCols = 100;
+    int partitionSize = 2;
+    int *resultGPU = (int *)malloc(numRows * quotientSize * sizeof(int));
         // Allocate memory for the matrix
     int *matrix = (int *)malloc(numRows * numCols * sizeof(int));
     
@@ -114,7 +116,7 @@ int main() {
     generateRandomSparseMatrix(matrix, numRows, numCols, 0.25); // 25% sparse matrix
 
     // Perform column partitioning on GPU
-    columnPartition((int *)matrix, numRows, numCols, 2);
+    columnPartition((int *)matrix, numRows, numCols, partitionSize, resulGPU);
 
     return 0;
 }
