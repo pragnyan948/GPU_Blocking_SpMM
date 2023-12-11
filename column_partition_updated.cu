@@ -108,6 +108,7 @@ int main() {
     int numRows = 100;
     int numCols = 100;
     int partitionSize = 2;
+    int quotientSize = numCols / partitionSize;
     int *resultGPU = (int *)malloc(numRows * quotientSize * sizeof(int));
         // Allocate memory for the matrix
     int *matrix = (int *)malloc(numRows * numCols * sizeof(int));
@@ -116,7 +117,7 @@ int main() {
     generateRandomSparseMatrix(matrix, numRows, numCols, 0.25); // 25% sparse matrix
 
     // Perform column partitioning on GPU
-    columnPartition((int *)matrix, numRows, numCols, partitionSize, resulGPU);
+    columnPartition((int *)matrix, numRows, numCols, partitionSize, resultGPU);
 
     return 0;
 }
