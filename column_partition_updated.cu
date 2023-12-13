@@ -25,6 +25,33 @@ __global__ void columnPartitionKernel(int *matrix, int numRows, int numCols, int
     }
 }
 
+// Optimized CUDA kernel for column partitioning
+__global__ void OptcolumnPartitionKernel(int *matrix, int numRows, int numCols, int partitionSize, int *result) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Ensure that the thread corresponds to a valid row
+    if (row < numRows) {
+        int quotientSize = numCols / partitionSize;
+        int *binaryVector = result + row * quotientSize;
+
+        // Compute one element of the binary vector for each row and partition
+        for (int partition = 0; partition < quotientSize; partition++) {
+            binaryVector[partition] = 0;
+
+            // Compute the start and end columns for the current partition
+            int startCol = partition * partitionSize;
+            int endCol = (partition + 1) * partitionSize;
+
+            // Check if there is a non-zero element in the current segment
+            for (int j = startCol; j < endCol && j < numCols; j++) {
+                if (matrix[row * numCols + j] != 0) {
+                    binaryVector[partition] = 1;
+                }
+            }
+        }
+    }
+}
+
 // Function to write a result matrix to a text file for GPU
 void writeResultMatrixToFileGPU(int *result, int numRows, int quotientSize, const char *filename) {
     FILE *file = fopen(filename, "w");
