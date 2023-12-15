@@ -46,6 +46,7 @@ __global__ void OptcolumnPartitionKernel(int *matrix, int numRows, int numCols, 
             for (int j = startCol; j < endCol && j < numCols; j++) {
                 if (matrix[row * numCols + j] != 0) {
                     binaryVector[partition] = 1;
+                    break;
                 }
             }
         }
