@@ -1,69 +1,83 @@
 #include <stdio.h>
 #include "merging.h"
-#include <thrust/scan.h>
-#include <thrust/device_ptr.h>
-extern const int TILE_SIZE = 256;
-extern const int BLOCK_SIZE = 256;
 
-#define NUM_ELEMENTS 256
-#define HISTO_WIDTH 256
+extern const int TILE_SIZE = 1024;
+__constant__ unsigned int group_indices_c[BLOCK_SIZE];
+__constant__ unsigned int group_csr_c[BLOCK_SIZE];
+#define HISTO_WIDTH 1024
 void blockSums_fn(unsigned int* outArray, unsigned int* inArray,unsigned int* blockSums, unsigned int* blockSums_out, int numElements, int gridsize, dim3 gridDim, dim3 blockDim);
 
 
 __global__ void similarity(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned int blocks_across_width, unsigned int height)
 {
-    __shared__ float V_s[NUM_ELEMENTS];
+    __shared__ float V_s[BLOCK_SIZE];
+    __shared__ float num_tau[BLOCK_SIZE];
+    __shared__ float den_tau[BLOCK_SIZE];
+    __shared__ float tau_idx[BLOCK_SIZE];
+    __shared__ int group_indices_s[BLOCK_SIZE];
+    __shared__ int pattern[BLOCK_SIZE];
+    __shared__ int pattern_NNZ[BLOCK_SIZE];
+    __shared__ int compare_factor[BLOCK_SIZE];
     __syncthreads();
-    int t = threadIdx.x; 
     int start_csr, end_csr, start_point, end_point;
-    float num_tau[NUM_ELEMENTS];
-    float den_tau[NUM_ELEMENTS];
-    float tau_idx[NUM_ELEMENTS];
-    int compare_factor[NUM_ELEMENTS];
     float limit_factor;
-    int lambda0;
-    int NNZPattern=0;
-    unsigned int start = blockDim.x*blockIdx.x;
-    unsigned int end = blocks_across_width*height;
-    if(t<height){
-        for( int k = 0; k <blocks_across_width ; k++){
-            V_s[t*height+k] = in.inVector[start+t*blocks_across_width+k]; 
-            //out.outPattern[start+t*blocks_across_width+k]=in.inVector[start+t*blocks_across_width+k]; 
-        }
+    unsigned int start =  blockDim.x*blockIdx.x+blockDim.x*gridDim.x*blockIdx.y;
+    unsigned int end = blockDim.x - blocks_across_width;
+	int bx = blockIdx.x;  int by = blockIdx.y;
+    int tx = threadIdx.x; int ty = threadIdx.y;
+    int Row = by * blockDim.y + ty;
+    int Col = bx * blockDim.x + tx;
+    if((tx<blocks_across_width)&&(bx<height)){
+        pattern[tx]=in.inVector[bx*blocks_across_width+tx]; 
+        pattern_NNZ[0]=0;
+        group_indices_s[tx] = in.group_indices_data[tx];
         __syncthreads();
         for( int k = 0; k <blocks_across_width ; k++){
-            V_s[t+end]+=V_s[t*height+k];
+            V_s[tx]+=pattern[k];
         }
         __syncthreads();
-        start_csr=blocks_across_width-V_s[t+end]-1;
+        limit_factor=V_s[tx]/(1-tau/2);
+        start_csr=blocks_across_width-1-V_s[tx]-limit_factor;
         if(start_csr<0){start_csr=0;}
-        end_csr=blocks_across_width-V_s[t+end]+2;
-        if(end_csr>blocks_across_width){end_csr=blocks_across_width;}
+        end_csr=blocks_across_width-1-V_s[tx]+limit_factor;
+        if(end_csr>blocks_across_width-1){end_csr=blocks_across_width-1;}
         start_point=in.group_indices_csr[start_csr];
         end_point=in.group_indices_csr[end_csr];
         __syncthreads();
-        limit_factor=V_s[t+end]/(1-tau/2);
-        for (int jj = start_point; jj <end_point ; jj++){
-            for (int k = 0; k <blocks_across_width ; k++)
-                {
-                    num_tau[jj]+= ((in.group[in.group_indices_data[jj]]==-1)&&(V_s[t*height+k] == in.inVector[in.group_indices_data[jj]*blocks_across_width+k]))?in.inVector[in.group_indices_data[jj]*blocks_across_width+k]:0;
-                    den_tau[jj]+= ((in.group[in.group_indices_data[jj]]==-1)&&((V_s[t*height+k] + in.inVector[in.group_indices_data[jj]*blocks_across_width+k])>=1))?1:0;
+        for (int k = group_indices_s[end_point]; k <group_indices_s[start_point]+1 ; k++){
+            num_tau[tx]= ((in.group[k]==-1)&&(pattern[tx] == in.inVector[k*blocks_across_width+tx]))?in.inVector[k*blocks_across_width+tx]:0;
+            den_tau[tx]= ((in.group[k]==-1)&&((pattern[tx] + in.inVector[k*blocks_across_width+tx])>=1))?1:0;
+            __syncthreads();
+            for (int stride = 1; stride < blockDim.x; stride *= 2) {
+                int index = 2 * stride * tx;
+                if (index < blockDim.x) {
+                    num_tau[index] += num_tau[index + stride];
+                    den_tau[index] += den_tau[index + stride];
                 }
-            tau_idx[jj]=num_tau[jj]/(den_tau[jj]);
-            compare_factor[jj]=(tau_idx[jj]>tau)?1:0;
-            //Compute NNZpattern
-            (compare_factor[jj])?atomicCAS(&in.group[in.group_indices_data[jj]],-1, t):0;
-            __syncthreads();
-            NNZPattern=(in.group[in.group_indices_data[jj]]!=-1)?0:NNZPattern;
-            for (int k = 0; k <blocks_across_width ; k++){
-                (compare_factor[jj]&&(in.group[in.group_indices_data[jj]]!=-1))?atomicMax(&out.outPattern[in.group[in.group_indices_data[jj]]*blocks_across_width+k],in.inVector[in.group_indices_data[jj]*blocks_across_width+k]):0;
-                NNZPattern+=(in.group[in.group_indices_data[jj]]!=-1)?out.outPattern[in.group[in.group_indices_data[jj]]*blocks_across_width+k]:0;
+                __syncthreads();
             }
+            tau_idx[k]=(in.group[k]==-1)?num_tau[0]/(den_tau[0]):0;
+            compare_factor[k]=(tau_idx[k]>tau)?1:0;
+            ((tx==0) && compare_factor[k]&&(pattern_NNZ[0]<=limit_factor))?atomicCAS(&in.group[k],-1, bx):0;
             __syncthreads();
-            //(compare_factor[jj] &&(NNZPattern[group[jj]]<limit_factor[group[jj]])))?Atomic_Compare (group[jj],,-1, t):
+            (compare_factor[k]&&(in.group[k]!=-1))?atomicMax(&pattern[tx],in.inVector[k*blocks_across_width+tx]):0;
+            __syncthreads(); 
+            //Compute NNZpattern
+            pattern_NNZ[tx] = pattern[tx];
+            __syncthreads(); 
+            for (int stride = 1; stride < blockDim.x; stride *= 2) {
+                int index = 2 * stride * tx;
+                if (index < blockDim.x) {
+                    pattern_NNZ[index] += (in.group[k]!=-1)?pattern_NNZ[index + stride]:0;
+                }
+                __syncthreads();
+            }
+            //NNZPattern+=(in.group[group_indices_s[jj]]!=-1)?out.midPattern[in.group[group_indices_s[jj]]*blocks_across_width+k]:0;
+            //(compare_factor[jj] &&(NNZPattern[group[jj]]<limit_factor[group[jj]])))?Atomic_Compare (in.group[jj],,-1, t):
         }
-        in.group[t]+=1;
-    __syncthreads();
+        in.group[bx]+=1;
+        out.midPattern[bx*blocks_across_width+tx]=pattern[tx];
+        __syncthreads();
     }
 }
 
@@ -77,6 +91,7 @@ __global__ void block_height(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned i
     int k = threadIdx.x + blockIdx.x * blockDim.x;
     // stride is total number of threads
     int stride = blockDim.x * gridDim.x;
+    __syncthreads();
     while (k< height) {
         atomicAdd( &(histo_group[in.group[k]]), 1);
         k += stride;
@@ -86,39 +101,37 @@ __global__ void block_height(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned i
         atomicAdd( &(out.blocks_height[threadIdx.x]),histo_group[threadIdx.x] );
     }
     __syncthreads();
+    k = threadIdx.x + blockIdx.x * blockDim.x;
+    if (k< height){
+        for(int i = 0; i<k; i++){
+            out.pattern_indices[k]+=(out.blocks_height[i]!=0)?1:0;
+        }
+    }
+    __syncthreads();
 }
 
 __global__ void reordering(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned int blocks_across_width, unsigned int height,unsigned int* blocksums){
     int t = threadIdx.x;
-    int block_test[NUM_ELEMENTS];
-    for(int i=0; i<NUM_ELEMENTS; i++){
-        block_test[i]=0;
-    }
+    //int block_test[NUM_ELEMENTS];
+    //for(int i=0; i<NUM_ELEMENTS; i++){
+        //block_test[i]=0;
+    //}
     if(t<height){
         if(t>0){
             int jj=0;
             while(jj< (out.blocks_height[t]-out.blocks_height[t-1])){
                 for(int k = 0; k <height; k++){
                     for(int i = 0; i <blocks_across_width; i++){
-                        //out.outVector[(out.blocks_height[t]-1+jj)*blocks_across_width+i]=(in.group[k]==t)?in.inVector[k*blocks_across_width+i]:0;
-                        block_test[(out.blocks_height[t-1]+jj)*blocks_across_width+i]=(in.group[k]==t)?in.inVector[k*blocks_across_width+i]:0;
+                       out.outVector[(out.blocks_height[t-1]+jj)*blocks_across_width+i]=(in.group[k]==t)?in.inVector[k*blocks_across_width+i]: out.outVector[(out.blocks_height[t-1]+jj)*blocks_across_width+i];
+                       if(jj==0){
+                        out.outPattern[(out.pattern_indices[t])*blocks_across_width+i]=(in.group[k]==t)?out.midPattern[k*blocks_across_width+i]:out.outPattern[(out.pattern_indices[t])*blocks_across_width+i];
+                       }
                     }
                     jj+=(in.group[k]==t)?1:0;
                 }
             }
         }
-        else if(t==0){
-            int jj=0;
-            while(jj< out.blocks_height[0]){
-                for(int k = 0; k <height; k++){
-                    for(int i = 0; i <blocks_across_width; i++){
-                        //out.outVector[(out.blocks_height[t]+jj)*blocks_across_width+i]=(in.group[k]==t)?in.inVector[k*blocks_across_width+i]:0;
-                        block_test[(jj)*blocks_across_width+i]=(in.group[k]==0)?in.inVector[k*blocks_across_width+i]:0;
-                    }
-                    jj+=(in.group[k]==t)?1:0;
-                }                
-            }
-        }
+        __syncthreads();
     }
 }
 
@@ -274,7 +287,7 @@ void blockSums_fn(unsigned int* outArray, unsigned int* inArray,unsigned int* bl
 }
 
 
-void MergeOnDevice(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned int blocks_across_width, unsigned int height)
+void MergeOnDevice(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned int blocks_across_width, unsigned int height, unsigned int* group_indices_data, unsigned int* group_indices_csr)
 {
     unsigned int* outArray;
 	cudaMalloc((void**)&outArray, height*sizeof(unsigned int));
@@ -282,13 +295,18 @@ void MergeOnDevice(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned int blocks_
 	cudaMalloc((void**)&blockSums, height*sizeof(unsigned int));
     unsigned int* blockSums_out;
 	cudaMalloc((void**)&blockSums_out, height*sizeof(unsigned int));
+    //cudaMemcpyToSymbol(group_csr_c, group_indices_csr, (blocks_across_width+1)*sizeof(unsigned int));
+    cudaMemcpyToSymbol(group_indices_c, group_indices_data, height*sizeof(unsigned int));
     dim3 blockDim(BLOCK_SIZE,1,1);
-    int gridsize = 1;
+    int gridsize = height;
     int gridsize_x;
     int gridsize_y;
     if (gridsize > TILE_SIZE){
         gridsize_x = TILE_SIZE;
-        gridsize_y = gridsize/TILE_SIZE+1;
+        gridsize_y = gridsize/TILE_SIZE;
+        if(gridsize % TILE_SIZE){
+            gridsize_y++;
+        }
     }
     else{
         gridsize_x=gridsize;
@@ -299,5 +317,5 @@ void MergeOnDevice(Out_1DSAAD out, In_1DSAAD in, float tau, unsigned int blocks_
     block_height<<<gridDim,blockDim>>>(out, in, tau, blocks_across_width, height);
     inclusive_scan(outArray, out.blocks_height, blockSums, blockSums_out, height, gridsize, gridDim, blockDim);
     out.blocks_height=outArray;
-    reordering<<<gridDim,blockDim>>>(out, in, tau, blocks_across_width, height, blockSums_out);
+    //reordering<<<gridDim,blockDim>>>(out, in, tau, blocks_across_width, height, blockSums_out);
 }

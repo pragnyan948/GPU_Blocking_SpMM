@@ -2,22 +2,34 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <cmath>
 
 extern "C"
 void computeGold(unsigned int* outVector, unsigned int* inVector,
                 unsigned int* blocks_height, unsigned int* outPattern,
                 unsigned int* group_indices_data, unsigned int* group_indices_csr,
-                float tau, unsigned int blocks_across_width, unsigned int height,int grp_count, unsigned int* order_ds, int* group,  unsigned int* NNZ_pattern);
+                float tau, unsigned int blocks_across_width, unsigned int height,int* grp_count, unsigned int* order_ds, int* group,  unsigned int* NNZ_pattern);
 void WriteFile(unsigned int* Vector, char* file_name, unsigned int width, int height);
 void Initialize(unsigned int* Vector, unsigned int width, unsigned int height, unsigned int val);
 float similarity(unsigned int* Vector1, unsigned int* Vector2, unsigned int count);
-void WriteFile(unsigned int* Vector, char* file_name, unsigned int width, int height);
+void WriteFile_2(int* Vector, char* file_name, unsigned int width, int height);
 void reorder(unsigned int* outVector,unsigned int* inVector, unsigned int* order, unsigned int* outPattern, unsigned int height, unsigned int blocks_across_width);
-
+int ReadFile(unsigned int* Vector, char* file_name, unsigned int width, int height);
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
-
+int ReadFile(unsigned int* Vector, char* file_name, unsigned int width, int height)
+{
+    unsigned int data_read = width * height;
+    FILE* input = fopen(file_name, "r");
+    for (unsigned i = 0; i < height; i++) {
+        for (unsigned j = 0; j < width; j++) {
+            fscanf(input, "%d", &(Vector[j+i*width]));
+        }
+     }
+    fclose(input);
+    return data_read;
+}
 void WriteFile(unsigned int* Vector, char* file_name, unsigned int width, int height)
 {
     FILE* output = fopen(file_name, "w");
@@ -88,11 +100,13 @@ void reorder(unsigned int* outVector,unsigned int* inVector, unsigned int* order
 void computeGold(unsigned int* outVector, unsigned int* inVector,
                 unsigned int* blocks_height, unsigned int* outPattern,
                 unsigned int* group_indices_data, unsigned int* group_indices_csr,
-                float tau, unsigned int blocks_across_width, unsigned int height,int grp_count, unsigned int* order_ds, int* group,  unsigned int* NNZ_pattern)
+                float tau, unsigned int blocks_across_width, unsigned int height,int* grp_count, unsigned int* order_ds, int* group,  unsigned int* NNZ_pattern)
 {
-    int idx =0;
-    float tau_idx, limit_factor;
+    int NNZ_idx =0;
+    float tau_idx;
+    float limit_factor;
     int lambda0;
+    grp_count[0]=0;
 
     for( int i = 0; i < height; i++) 
     {
@@ -102,43 +116,43 @@ void computeGold(unsigned int* outVector, unsigned int* inVector,
             //Save initial pattern
             for( int j = 0; j < blocks_across_width; j++) 
             {
-                outPattern[j+blocks_across_width*grp_count] = inVector[j+i*blocks_across_width];
+                outPattern[j+blocks_across_width*grp_count[0]] = inVector[j+i*blocks_across_width];
                 group[i]=i;
-                lambda0+=outPattern[j+blocks_across_width*grp_count];
+                lambda0+=inVector[j+i*blocks_across_width];
                 if(lambda0==0){
                     group[i]=-1;
                 }
             }
-            //printf("grp_count: %d\n", grp_count);
-            order_ds[idx]=i;
-            idx+=1;
+            //printf("grp_count[0]: %d", grp_count[0]);
             if(lambda0!=0){
+                order_ds[NNZ_idx]=i;
+                NNZ_idx+=1;
                 limit_factor=lambda0/(1-tau/2);
                 //iterate over rows that not inserted into group and find similarity
-                int start_csr=4-lambda0-1;
+                int start_csr=blocks_across_width-1-lambda0-limit_factor;
                 if(start_csr<0){start_csr=0;}
-                int end_csr=4-lambda0+2;
-                if(end_csr>4){end_csr=4;}
+                int end_csr=blocks_across_width-1-lambda0+limit_factor;
+                if(end_csr>blocks_across_width-1){end_csr=blocks_across_width-1;}
                 int start_index=group_indices_csr[start_csr];
                 int end_index=group_indices_csr[end_csr];
-                for( int k = start_index; k <end_index; k++){
+                //printf("%d %d\n", start_index, end_index);
+                for( int k = start_csr; k <end_index; k++){
                     int j=group_indices_data[k];
-                    //printf("j:%d\n", j);
-                    if((group[j]==-1) && (NNZ_pattern[grp_count]<=limit_factor)&&(i!=j)){
-                        tau_idx = similarity( inVector+i*blocks_across_width, inVector+j*blocks_across_width, blocks_across_width);
+                    if((group[j]==-1)&&(i!=j)&&(NNZ_pattern[grp_count[0]]<=limit_factor)){
+                        tau_idx = similarity( outPattern+grp_count[0]*blocks_across_width, inVector+j*blocks_across_width, blocks_across_width);
                         //printf("%f\n", tau_idx);
                         if(tau_idx>tau){
-                            group_patt_up(outPattern+grp_count*blocks_across_width, inVector+j*blocks_across_width, NNZ_pattern[grp_count], blocks_across_width);
-                            order_ds[idx]=j;
+                            group_patt_up(outPattern+grp_count[0]*blocks_across_width, inVector+j*blocks_across_width, NNZ_pattern[grp_count[0]], blocks_across_width);
+                            order_ds[NNZ_idx]=j;
                             group[j] =i;
-                            blocks_height[grp_count]+=1;
-                            //printf("order_ds: %d\n", order_ds[idx]);
-                            idx+=1;
+                            blocks_height[grp_count[0]]+=1;
+                            //printf("order_ds: %d\n", order_ds[NNZ_idx]);
+                            NNZ_idx+=1;
                         }
                     }
                 }
+                grp_count[0]+=1;
             }
-            grp_count+=1;
         }
     }
     for( int i = 0; i < height; i++) 
@@ -146,11 +160,6 @@ void computeGold(unsigned int* outVector, unsigned int* inVector,
         group[i]+=1;
     }
     reorder(outVector, inVector, order_ds, outPattern, height, blocks_across_width);
-
-    char* file_name_param[4] ={"./Data/order_ds.txt", "./Data/group.txt","./Data/blocks_height.txt", "./Data/outPattern.txt"};
-    WriteFile(order_ds, file_name_param[0], 1,idx);
-    WriteFile_2(group, file_name_param[1], 1,idx);
-    WriteFile(blocks_height, file_name_param[2], 1,grp_count);
-    WriteFile(outPattern, file_name_param[3], blocks_across_width, grp_count);
+    grp_count[1]=NNZ_idx;
 }
 

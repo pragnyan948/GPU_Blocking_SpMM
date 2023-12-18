@@ -1,12 +1,16 @@
+#ifndef _MERGE_H_
+#define _MERGE_H_
 
 #include <sys/time.h>
+#define BLOCK_SIZE 1024
+
 
 typedef struct {
     unsigned int* outVector;
     unsigned int* blocks_height;
     unsigned int* outPattern;
-    unsigned int* NNZPattern;
-    unsigned int* group_count;
+    unsigned int* midPattern;
+    unsigned int* pattern_indices;
 } Out_1DSAAD;
 
 typedef struct {
@@ -27,5 +31,5 @@ typedef struct {
         exit(-1);\
     } while(0)
 
-
+#endif // _MERGE_H_
 
