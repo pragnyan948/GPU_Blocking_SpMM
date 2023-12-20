@@ -136,7 +136,7 @@ void computeGold(unsigned int* outVector, unsigned int* inVector,
                 int start_index=group_indices_csr[start_csr];
                 int end_index=group_indices_csr[end_csr];
                 //printf("%d %d\n", start_index, end_index);
-                for( int k = start_csr; k <end_index; k++){
+                for( int k = start_index; k <end_index; k++){
                     int j=group_indices_data[k];
                     if((group[j]==-1)&&(i!=j)&&(NNZ_pattern[grp_count[0]]<=limit_factor)){
                         tau_idx = similarity( outPattern+grp_count[0]*blocks_across_width, inVector+j*blocks_across_width, blocks_across_width);
