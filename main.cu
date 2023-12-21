@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
     int *matrix = (int *)malloc(numRows * numCols * sizeof(int));
     
     // Generate a random matrix
+    // Sparsity can be changed
     generateRandomSparseMatrix(matrix, numRows, numCols, 0.25); // 25% sparse matrix
 
     // Write the generated matrix to a text file
