@@ -23,14 +23,14 @@ Input:
 Currently we are generating random sparse matrix of given sparsity which can be changed in the main code.
 
 Files:
-main.cu: the main function which integrated all stages
-support.cu: Supporting function definitions
-support.h: supporting header files 
-column_partition_updated.cpp: The CPU implementation for column partitioning
-column_partitioning_updated.cu: The GPU kernel implementation for column partitioning
-hash.cpp: CPU implementation for hash-based compression
-hash.cu: GPU implementation for hash-based compression
-merging_gold.cpp: CPU implementation for two-step merging
-merging.cu: GPU kernel for two-step merging
-merging.h: supporting header files for merging
+main.cu: the main function which integrated all stages.
+support.cu: Supporting function definitions.
+support.h: supporting header files.
+column_partition_updated.cpp: The CPU implementation for column partitioning.
+column_partitioning_updated.cu: The GPU kernel implementation for column partitioning.
+hash.cpp: CPU implementation for hash-based compression.
+hash.cu: GPU implementation for hash-based compression.
+merging_gold.cpp: CPU implementation for two-step merging.
+merging.cu: GPU kernel for two-step merging.
+merging.h: supporting header files for merging.
 
